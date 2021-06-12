@@ -1,0 +1,3 @@
+rootProject.name = "PdfView"
+include ':app'
+include ':pdfsdk'
