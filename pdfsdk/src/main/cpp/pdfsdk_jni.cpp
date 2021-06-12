@@ -98,7 +98,11 @@ DocumentFile::~DocumentFile() {
 }
 
 JNI_FUNC(jlong, PdfiumSDK, nativeOpenDocument)(JNI_ARGS, jint fd, jstring password) {
+    return -1;
+}
 
+JNI_FUNC(jlong, PdfiumSDK, nativeOpenMemDocument)(JNI_ARGS, jbyteArray data, jstring password) {
+    return -1;
 }
 
 } // extern "C"
