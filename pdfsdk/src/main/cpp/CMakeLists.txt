@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.4.1)
 
 # Specify where JPEGTurbo libraries are located
 set(Pdfium_DIR ${CMAKE_SOURCE_DIR}/pdfium)
+set(Utils_DIR ${CMAKE_SOURCE_DIR}/utils)
 
 # shared lib will also be tucked into APK and sent to target
 # refer to app/build.gradle, jniLibs section for that purpose.
@@ -15,6 +16,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-warn-mismatch")
 
 include_directories(${Pdfium_DIR}/include)
+
+add_subdirectory(${Utils_DIR})
 
 # Creates and names a library, sets it as either STATIC
 # or SHARED, and provides the relative paths to its source code.
@@ -42,6 +45,7 @@ target_include_directories(pdfsdk_jni PRIVATE
 target_link_libraries( # Specifies the target library.
                        pdfsdk_jni
                        pdfsdk
+                       hk_utils
                        jnigraphics
                        android
                        GLESv2
