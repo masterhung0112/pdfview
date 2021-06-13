@@ -9,6 +9,13 @@
 #include <hk_file.h>
 #include <public/cpp/fpdf_scopers.h>
 
+template<class string_type>
+inline typename string_type::value_type *WriteInto(string_type *str, size_t length_with_null) {
+    str->reserve(length_with_null);
+    str->resize(length_with_null - 1);
+    return &((*str)[0]);
+}
+
 extern "C" {
 
 static int sLibraryReferenceCount = 0;
@@ -122,6 +129,35 @@ static int getBlock(void *param, unsigned long position, unsigned char *outBuffe
     }
     return 1;
 }
+
+static jlong loadPageInternal(JNIEnv *env, DocumentFile *doc, int pageIndex) {
+    try {
+        if (doc == nullptr) throw "Get page document null";
+
+        if (doc->pdfDocument.get() != nullptr) {
+            FPDF_PAGE page = FPDF_LoadPage(doc->pdfDocument.get(), pageIndex);
+            if (page == nullptr) {
+                throw "Loaded page is NULL";
+            }
+
+            return reinterpret_cast<jlong>(page);
+        } else {
+            throw "Get page pdf document null";
+        }
+    } catch (const char *msg) {
+        LOGE("%s", msg);
+
+        jniThrowException(env, "java/lang/IllegalStateException",
+                          "cannot load page");
+
+        return -1;
+    }
+}
+
+static void closePageInternal(jlong pagePtr) {
+    FPDF_ClosePage(reinterpret_cast<FPDF_PAGE>(pagePtr));
+}
+
 unsigned long ConvertLastError(char *buf, size_t buf_len) {
     unsigned long err = FPDF_GetLastError();
     switch (err) {
@@ -195,6 +231,58 @@ JNI_FUNC(jlong, PdfiumSDK, nativeOpenDocument)(JNI_ARGS, jint fd, jstring passwo
 
 JNI_FUNC(jlong, PdfiumSDK, nativeOpenMemDocument)(JNI_ARGS, jbyteArray data, jstring password) {
     return -1;
+}
+
+JNI_FUNC(jint, PdfiumSDK, nativeGetPageCount)(JNI_ARGS, jlong documentPtr) {
+    DocumentFile *doc = reinterpret_cast<DocumentFile *>(documentPtr);
+    return (jint)FPDF_GetPageCount(doc->pdfDocument.get());
+}
+
+JNI_FUNC(void, PdfiumSDK, nativeCloseDocument)(JNI_ARGS, jlong documentPtr) {
+    DocumentFile *doc = reinterpret_cast<DocumentFile *>(documentPtr);
+    delete doc;
+}
+
+JNI_FUNC(jstring, PdfiumSDK, nativeGetDocumentMetaText)(JNI_ARGS, jlong documentPtr, jstring tag) {
+    const char *ctag = env->GetStringUTFChars(tag, NULL);
+    if (ctag == NULL) {
+        return env->NewStringUTF("");
+    }
+    DocumentFile *doc = reinterpret_cast<DocumentFile *>(documentPtr);
+    const unsigned long bufferLen = FPDF_GetMetaText(doc->pdfDocument.get(), ctag, NULL, 0);
+    if (bufferLen <= 2) {
+        return env->NewStringUTF("");
+    }
+
+    std::wstring text;
+    FPDF_GetMetaText(doc->pdfDocument.get(), ctag, WriteInto(&text, bufferLen + 1), bufferLen);
+    env->ReleaseStringUTFChars(tag, ctag);
+    return env->NewString((jchar *)text.c_str(), bufferLen / 2 - 1);
+}
+
+JNI_FUNC(jlong, PdfiumSDK, nativeLoadPage)(JNI_ARGS, jlong documentPtr, jint pageIndex) {
+    DocumentFile *doc = reinterpret_cast<DocumentFile *>(documentPtr);
+    return loadPageInternal(env, doc, pageIndex);
+}
+
+JNI_FUNC(void, PdfiumSDK, nativeClosePage)(JNI_ARGS, jlong pagePtr) { closePageInternal(pagePtr); }
+JNI_FUNC(void, PdfiumSDK, nativeClosePages)(JNI_ARGS, jlongArray pagesPtr) {
+    int length = (int) (env->GetArrayLength(pagesPtr));
+    jlong *pages = env->GetLongArrayElements(pagesPtr, NULL);
+
+    int i;
+    for (i = 0; i < length; i++) { closePageInternal(pages[i]); }
+}
+
+///////////////////////////////////////
+// PDF TextPage api
+///////////
+static void closeTextPageInternal(jlong textPagePtr) {
+    FPDFText_ClosePage(reinterpret_cast<FPDF_TEXTPAGE>(textPagePtr));
+}
+
+JNI_FUNC(void, PdfiumSDK, nativeCloseTextPage)(JNI_ARGS, jlong textPagePtr) {
+    closeTextPageInternal(textPagePtr);
 }
 
 } // extern "C"

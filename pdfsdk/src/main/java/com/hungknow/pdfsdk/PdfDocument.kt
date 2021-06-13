@@ -2,7 +2,7 @@ package com.hungknow.pdfsdk
 
 import android.os.ParcelFileDescriptor
 
-class PdfDocument(nativeDocPtr: Long, fileDescriptor: ParcelFileDescriptor) {
-//    private lateinit var mFileDescriptor: ParcelFileDescriptor
-//    private var mNativeDocPtr: Long = 0
+class PdfDocument(val NativeDocPtr: Long, var FileDescriptor: ParcelFileDescriptor?) {
+    val NativePagesPtr = mutableMapOf<Int, Long>()
+    val NativeTextPagesPtr = mutableMapOf<Int, Long>()
 }
