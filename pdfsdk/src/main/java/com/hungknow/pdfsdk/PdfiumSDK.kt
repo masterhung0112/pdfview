@@ -1,9 +1,12 @@
 package com.hungknow.pdfsdk
 
+import android.content.Context
 import android.os.ParcelFileDescriptor
 import java.io.IOException
 
-class PdfiumSDK {
+class PdfiumSDK(ctx: Context) {
+    var mCurrentDpi: Int = ctx.resources.displayMetrics.densityDpi
+
     external fun nativeOpenDocument(fd: Int, password: String): Long
     external fun nativeOpenMemDocument(data: ByteArray, password: String): Long
     external fun nativeGetPageCount(documentPtr: Long): Int
