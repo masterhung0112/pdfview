@@ -56,6 +56,12 @@ class PdfFile {
      */
     private val fitEachPage = false
 
+    /**
+     * The pages the user want to display in order
+     * (ex: 0, 2, 2, 8, 8, 1, 1, 1)
+     */
+    private val originalUserPages = mutableListOf<Int>()
+
     fun getPageAtOffset(offset: Float, zoom: Float): Int {
         var currentPage = 0
         for (i in 0 until pagesCount) {
@@ -71,5 +77,55 @@ class PdfFile {
     fun getPageSpacing(pageIndex: Int, zoom: Float): Float {
         val spacing = if (autoSpacing) pageSpacing[pageIndex] else spacingPx
         return spacing * zoom
+    }
+
+    fun getPageOffset(pageIndex: Int, zoom: Float): Float {
+        var docPage = documentPage(pageIndex)
+        if (docPage < 0) {
+            docPage = 0
+        }
+        return pageOffsets.get(pageIndex) * zoom
+    }
+
+    /** Get secondary page offset, that is X for vertical scroll and Y for horizontal scroll  */
+    fun getSecondaryPageOffset(pageIndex: Int, zoom: Float): Float {
+        val pageSize = getPageSize(pageIndex)
+        return if (isVertical) {
+            val maxWidth: Float = getMaxPageWidth()
+            zoom * (maxWidth - pageSize.width) / 2 //x
+        } else {
+            val maxHeight: Float = getMaxPageHeight()
+            zoom * (maxHeight - pageSize.height) / 2 //y
+        }
+    }
+
+    fun getPageSize(pageIndex: Int): SizeF {
+        val docPage = documentPage(pageIndex)
+        return if (docPage < 0) {
+            SizeF(0f, 0f)
+        } else pageSizes[pageIndex]
+    }
+
+    fun getScaledPageSize(pageIndex: Int, zoom: Float): SizeF {
+        val size = getPageSize(pageIndex)
+        return SizeF(size.width * zoom, size.height * zoom)
+    }
+
+
+    fun documentPage(userPage: Int): Int {
+        var documentPage = userPage
+        if (originalUserPages != null) {
+            if (userPage < 0 || userPage >= originalUserPages.size) {
+                return -1
+            } else {
+                documentPage = originalUserPages.get(userPage)
+            }
+        }
+
+        if (documentPage < 0 || userPage >= pagesCount) {
+            return -1
+        }
+
+        return documentPage
     }
 }

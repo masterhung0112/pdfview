@@ -70,7 +70,7 @@ class PdfView: RelativeLayout {
         }
 
         pagesLoader = PagesLoader(this)
-        pdfiumSdk = PdfiumSDK(context)
+        pdfiumSdk = PdfiumSDK(context.resources.displayMetrics.densityDpi)
         setWillNotDraw(false)
     }
 
@@ -106,6 +106,7 @@ class PdfView: RelativeLayout {
         renderingHandler!!.removeMessages(RenderingHandler.MSG_RENDER_TASK)
         cacheManager.makeANewSet()
         pagesLoader.loadPages()
-        redraw()
+        invalidate()
     }
+
 }
