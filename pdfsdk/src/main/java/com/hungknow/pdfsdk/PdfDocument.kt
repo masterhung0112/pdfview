@@ -1,5 +1,6 @@
 package com.hungknow.pdfsdk
 
+import android.graphics.RectF
 import android.os.ParcelFileDescriptor
 
 class PdfDocument(val NativeDocPtr: Long, var FileDescriptor: ParcelFileDescriptor?) {
@@ -40,4 +41,6 @@ class PdfDocument(val NativeDocPtr: Long, var FileDescriptor: ParcelFileDescript
 
         return userPage
     }
+
+    data class Link(val bounds: RectF, val destPageIdx: Int, val uri: String)
 }

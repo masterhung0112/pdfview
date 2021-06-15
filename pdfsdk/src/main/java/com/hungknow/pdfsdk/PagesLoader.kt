@@ -1,8 +1,11 @@
 package com.hungknow.pdfsdk
 
 import android.graphics.RectF
+import com.hungknow.pdfsdk.utils.Constants.Companion.Cache.CACHE_SIZE
 import com.hungknow.pdfsdk.utils.Constants.Companion.PART_SIZE
+import com.hungknow.pdfsdk.utils.Constants.Companion.PRELOAD_OFFSET
 import com.hungknow.pdfsdk.utils.MathUtils
+import com.hungknow.pdfsdk.utils.Utils
 
 
 class PagesLoader(val pdfView: PdfView) {
@@ -52,7 +55,11 @@ class PagesLoader(val pdfView: PdfView) {
     private var partRenderWidth = 0f
     private var partRenderHeight = 0f
     private var thumbnailRect = RectF(0f, 0f, 1f, 1f)
-    private var preloadOffset = 0
+    private var preloadOffset = 0f
+
+    init {
+        preloadOffset = Utils.getDP(pdfView.context.resources.displayMetrics, PRELOAD_OFFSET)
+    }
 
     private fun getPageColsRows(grid: GridSize, pageIndex: Int) {
         val size = pdfView.pdfFile!!.getPageSize(pageIndex)
@@ -62,6 +69,32 @@ class PagesLoader(val pdfView: PdfView) {
         val partWidth: Float = PART_SIZE * ratioX / pdfView.zoom
         grid.rows = MathUtils.ceil(1f / partHeight)
         grid.cols = MathUtils.ceil(1f / partWidth)
+    }
+
+    private fun loadPage(page: Int, firstRow: Int, lastRow: Int, firstCol: Int, lastCol: Int, nbOfPartsLoadable: Int): Int {
+        var loaded = 0
+        for (row in firstRow..lastRow) {
+            for (col in firstCol..lastCol) {
+                if (loadCell(page, row, col, pageRelativePartWidth, pageRelativePartHeight)) {
+                    loaded++
+                }
+                if (loaded >= nbOfPartsLoadable) {
+                    return loaded
+                }
+            }
+        }
+        return loaded
+    }
+
+    private fun loadCell(page: Int, row: Int, col: Int, pageRelativePartWidth: Float, pageRelativePartHeight: Float): Boolean {
+        return false
+    }
+
+    private fun calculatePartSize(grid: GridSize) {
+        pageRelativePartWidth = 1f / grid.cols.toFloat()
+        pageRelativePartHeight = 1f / grid.rows.toFloat()
+        partRenderWidth = PART_SIZE / pageRelativePartWidth
+        partRenderHeight = PART_SIZE / pageRelativePartHeight
     }
 
     private fun loadVisible() {
@@ -75,6 +108,16 @@ class PagesLoader(val pdfView: PdfView) {
         val rangeList: List<RenderRange> =
             getRenderRangeList(firstXOffset, firstYOffset, lastXOffset, lastYOffset)
 
+        for (range in rangeList) {
+//            loadThumbnail(range.page)
+        }
+        for (range in rangeList) {
+            calculatePartSize(range.gridSize)
+            parts += loadPage(range.page, range.leftTop.row, range.rightBottom.row, range.leftTop.col, range.rightBottom.col, CACHE_SIZE - parts)
+            if (parts >= CACHE_SIZE) {
+                break
+            }
+        }
     }
 
     /**
@@ -107,7 +150,7 @@ class PagesLoader(val pdfView: PdfView) {
             if (page == firstPage) {
                 pageFirstXOffset = fixedFirstXOffset
                 pageFirstYOffset = fixedFirstYOffset
-                if (page == 1) {
+                if (pageCount == 1) {
                     pageLastXOffset = fixedLastXOffset
                     pageLastYOffset = fixedLastYOffset
                 } else {

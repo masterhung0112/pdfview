@@ -62,6 +62,15 @@ class PdfFile {
      */
     private val originalUserPages = mutableListOf<Int>()
 
+    val maxPageSize
+        get() = if (isVertical) maxWidthPageSize else maxHeightPageSize
+
+    val maxPageWidth
+        get() = maxPageSize.width
+
+    val maxPageHeight
+        get() = maxPageSize.height
+
     fun getPageAtOffset(offset: Float, zoom: Float): Int {
         var currentPage = 0
         for (i in 0 until pagesCount) {

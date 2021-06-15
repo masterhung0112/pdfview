@@ -15,7 +15,7 @@ class Constants {
         var PART_SIZE = 256f
 
         /** Part of document above and below screen that should be preloaded, in dp  */
-        var PRELOAD_OFFSET = 20
+        var PRELOAD_OFFSET = 20f
 
         object Cache {
             /** The size of the cache (number of bitmaps kept)  */
