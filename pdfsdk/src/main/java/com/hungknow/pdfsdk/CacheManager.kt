@@ -4,6 +4,8 @@ import android.graphics.RectF
 import com.hungknow.pdfsdk.models.PagePart
 import com.hungknow.pdfsdk.utils.Constants.Cache.CACHE_SIZE
 import com.hungknow.pdfsdk.utils.Constants.Cache.THUMBNAILS_CACHE_SIZE
+import com.hungknow.pdfsdk.utils.Constants.Companion.Cache.CACHE_SIZE
+import com.hungknow.pdfsdk.utils.Constants.Companion.Cache.THUMBNAILS_CACHE_SIZE
 import java.util.PriorityQueue
 
 class CacheManager {

@@ -137,4 +137,8 @@ class PdfFile {
 
         return documentPage
     }
+
+    fun getDocLen(zoom: Float): Float {
+        return documentLength * zoom
+    }
 }

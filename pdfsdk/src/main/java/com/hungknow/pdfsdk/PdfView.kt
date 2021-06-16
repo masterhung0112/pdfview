@@ -1,15 +1,20 @@
 package com.hungknow.pdfsdk
 
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.PaintFlagsDrawFilter
+import android.graphics.*
+import android.os.AsyncTask
 import android.os.HandlerThread
 import android.util.AttributeSet
 import android.widget.RelativeLayout
-import com.hungknow.pdfsdk.listeners.Callbacks
+import com.hungknow.pdfsdk.link.DefaultLinkHandler
+import com.hungknow.pdfsdk.link.LinkHandler
+import com.hungknow.pdfsdk.listeners.*
 import com.hungknow.pdfsdk.models.PagePart
+import com.hungknow.pdfsdk.scroll.ScrollHandle
+import com.hungknow.pdfsdk.source.DocumentSource
+import com.hungknow.pdfsdk.utils.Constants.Companion.DEBUG_MODE
+import com.hungknow.pdfsdk.utils.FitPolicy
+import com.hungknow.pdfsdk.utils.Utils
 
 
 class PdfView: RelativeLayout {
@@ -33,7 +38,7 @@ class PdfView: RelativeLayout {
     lateinit var pdfiumSdk: PdfiumSDK
     lateinit var pagesLoader: PagesLoader
     val callbacks = Callbacks()
-
+    private var scrollHandle: ScrollHandle? = null
 
     /**
      * START - scrolling in first page direction
@@ -48,6 +53,9 @@ class PdfView: RelativeLayout {
 
     /** Rendered parts go to the cache manager  */
     val cacheManager = CacheManager()
+
+    /** Drag manager manage all touch events */
+    var dragPinchManager: DragPinchManager? = null
 
     /** The index of the current sequence */
     var currentPage = 0
@@ -80,26 +88,81 @@ class PdfView: RelativeLayout {
     var pdfFile: PdfFile? = null
         private set
 
-    // True if PDFView has been recycled
+    // True if PdfView has been recycled
     private var recycled = true
 
     /** Current state of the view  */
-    private val state = State.DEFAULT
+    private var state = State.DEFAULT
+
+    /** Async task used during the loading phase to decode a PDF document  */
+    private var decodingAsyncTask: DecodingAsyncTask? = null
 
     private lateinit var pdfDocument: PdfDocument
 
     /** Paint object for drawing  */
-    private val paint: Paint? = null
+    private var paint: Paint? = null
 
     /** Paint object for drawing debug stuff  */
-    private val debugPaint: Paint? = null
+    private var debugPaint: Paint? = null
+
+    /**
+     * True if bitmap should use ARGB_8888 format and take more memory
+     * False if bitmap should be compressed by using RGB_565 format and take less memory
+     */
+    private var bestQuality = false
+
+    /**
+     * True if annotations should be rendered
+     * False otherwise
+     */
+    private var annotationRendering = false
+
+    /**
+     * True if the view should render during scaling<br></br>
+     * Can not be forced on older API versions (< Build.VERSION_CODES.KITKAT) as the GestureDetector does
+     * not detect scrolling while scaling.<br></br>
+     * False otherwise
+     */
+    private var renderDuringScale = false
 
     /** Antialiasing and bitmap filtering  */
-    private val enableAntialiasing = true
+    private var enableAntialiasing = true
     private val antialiasFilter =
         PaintFlagsDrawFilter(0, Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
     private var nightMode = false
+
+    /** Spacing between pages, in px  */
+    private var spacing = 0f
+        set(value) { Utils.getDP(context.resources.displayMetrics, value) }
+
+    /** Add dynamic spacing to fit each page separately on the screen.  */
+    private var autoSpacing = false
+
+    /** Fling a single page at a time  */
+    private var pageFling = true
+
+    /** Pages numbers used when calling onDrawAll  */
+    private val onDrawPagesNums = mutableListOf<Int>()
+
+    /** Holds info whether view has been added to layout and has width and height  */
+    private var hasSize = false
+
+    /** Holds last used Configurator that should be loaded when view has size  */
+    private var waitingDocumentConfigurator: Configurator? = null
+
+    /** Policy for fitting pages to screen  */
+    private var pageFitPolicy = FitPolicy.WIDTH
+
+    private var fitEachPage = false
+
+    private var defaultPage = 0
+
+    private var enableSwipe = true
+
+    private var doubletapEnabled = true
+
+    private var pageSnap = true
 
     constructor(context: Context, set: AttributeSet): super(context) {
         if (isInEditMode) {
@@ -109,6 +172,18 @@ class PdfView: RelativeLayout {
         pagesLoader = PagesLoader(this)
         pdfiumSdk = PdfiumSDK(context.resources.displayMetrics.densityDpi)
         setWillNotDraw(false)
+    }
+
+    private fun load(docSource: DocumentSource, password: String) {
+        load(docSource, password, null)
+    }
+
+    private fun load(docSource: DocumentSource, password: String, userPages: IntArray?) {
+        check(recycled) { "Don't call load on a PDF View without recycling it first." }
+        recycled = false
+        // Start decoding document
+        decodingAsyncTask = DecodingAsyncTask(docSource, password, userPages, this, pdfiumSdk)
+        decodingAsyncTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR)
     }
 
     fun showPage(pageNb: Int) {
@@ -122,11 +197,11 @@ class PdfView: RelativeLayout {
 
         loadPages()
 
-//        if (scrollHandle != null && !documentFitsView()) {
-//            scrollHandle.setPageNum(currentPage + 1)
-//        }
-//
-//        callbacks.callOnPageChange(currentPage, pdfFile.getPagesCount())
+        if (scrollHandle != null && !documentFitsView()) {
+            scrollHandle!!.setPageNum(currentPage + 1)
+        }
+
+        callbacks.callOnPageChange(currentPage, pdfFile.pagesCount)
     }
 
     /**
@@ -184,21 +259,40 @@ class PdfView: RelativeLayout {
         // Draw parts
         for (part in cacheManager.pageParts) {
             drawPart(canvas, part)
-            if (callbacks.getOnDrawAll() != null
+            if (callbacks.onDrawAll != null
                 && !onDrawPagesNums.contains(part.page)) {
                 onDrawPagesNums.add(part.page);
             }
         }
 
         for (page in onDrawPagesNums) {
-            drawWithListener(canvas, page, callbacks.getOnDrawAll())
+            drawWithListener(canvas, page, callbacks.onDrawAll)
         }
         onDrawPagesNums.clear()
 
-        drawWithListener(canvas, currentPage, callbacks.getOnDraw())
+        drawWithListener(canvas, currentPage, callbacks.onDraw)
 
         // Restores the canvas position
         canvas.translate(-currentXOffset, -currentYOffset)
+    }
+
+    private fun drawWithListener(canvas: Canvas, page: Int, listener: OnDrawListener?) {
+        if (listener != null) {
+            var translateX = 0f
+            var translateY = 0f
+            if (swipeVertical) {
+                translateX = 0f
+                translateY = pdfFile!!.getPageOffset(page, zoom)
+            } else {
+                translateX = pdfFile!!.getPageOffset(page, zoom)
+                translateY = 0f
+            }
+
+            canvas.translate(translateX, translateY)
+            val size = pdfFile!!.getPageSize(page)
+            listener.onLayerDrawn(canvas, toCurrentScale(size.width), toCurrentScale(size.height), page)
+            canvas.translate(-translateX, -translateY)
+        }
     }
 
     /** Draw a given PagePart on the canvas */
@@ -213,15 +307,40 @@ class PdfView: RelativeLayout {
         }
 
         // Move to the target page
-        var localTransactionX = 0f
-        var localTransactionY = 0f
+        var localTranslationX = 0f
+        var localTranslationY = 0f
         var size = pdfFile.getPageSize(part.page)
 
         if (swipeVertical) {
-            localTransactionY = pdfFile.getPageOffset(part.page, zoom)
+            localTranslationY = pdfFile.getPageOffset(part.page, zoom)
             localTranslationX = toCurrentScale(pdfFile.maxPageWidth - size.width) / 2
+        } else {
+            localTranslationX = pdfFile.getPageOffset(part.page, zoom)
+            localTranslationY = toCurrentScale(pdfFile.maxPageHeight - size.height) / 2
+        }
+        canvas.translate(localTranslationX, localTranslationY)
+
+        var srcRect = Rect(0, 0, renderedBitmap.width, renderedBitmap.height)
+
+        val offsetX = toCurrentScale(pageRelativeBounds.left * size.width)
+        val offsetY = toCurrentScale(pageRelativeBounds.top * size.height)
+        val width = toCurrentScale(pageRelativeBounds.width() * size.width)
+        val height = toCurrentScale(pageRelativeBounds.height() * size.height)
+
+        // If we use float values for this rectangle, there will be
+        // a possible gap between page parts, especially when
+        // the zoom level is high.
+        val dstRect = Rect(offsetX.toInt(), offsetY.toInt(), (offsetX + width).toInt(), (offsetY + height).toInt())
+
+        canvas.drawBitmap(renderedBitmap, srcRect, dstRect, paint)
+
+        if (DEBUG_MODE) {
+            debugPaint!!.color = if (part.page % 2 === 0) Color.RED else Color.BLUE
+            canvas.drawRect(dstRect, debugPaint)
         }
 
+        // Restore the canvas position
+        canvas.translate(-localTranslationX, -localTranslationY)
     }
 
     fun toRealScale(size: Float): Float {
@@ -249,7 +368,236 @@ class PdfView: RelativeLayout {
 
     }
 
+    fun enableDoubletap(enableDoubletap: Boolean) {
+        this.doubletapEnabled = enableDoubletap
+    }
+
+    fun isDoubletapEnabled(): Boolean {
+        return doubletapEnabled
+    }
+
+    /**
+     * Checks if whole document can be displayed on screen, doesn't include zoom
+     *
+     * @return true if whole document can displayed at once, false otherwise
+     */
+    fun documentFitsView(): Boolean {
+        val len = pdfFile!!.getDocLen(1f)
+        return if (swipeVertical) {
+            len < height
+        } else {
+            len < width
+        }
+    }
+
     private enum class State {
         DEFAULT, LOADED, SHOWN, ERROR
+    }
+
+    inner class Configurator private constructor(val documentSource: DocumentSource) {
+        private var pageNumbers: IntArray? = null
+        private var enableSwipe = true
+        private var enableDoubletap = true
+        private var onDrawListener: OnDrawListener? = null
+        private var onDrawAll: OnDrawListener? = null
+        private var onLoadCompleteListener: OnLoadCompleteListener? = null
+        private var onErrorListener: OnErrorListener? = null
+        private var onPageChangeListener: OnPageChangeListener? = null
+        private var onPageScrollListener: OnPageScrollListener? = null
+        private var onRenderListener: OnRenderListener? = null
+        private var onTapListener: OnTapListener? = null
+        private var onLongPressListener: OnLongPressListener? = null
+        private var onPageErrorListener: OnPageErrorListener? = null
+        private var linkHandler: LinkHandler = DefaultLinkHandler(this)
+        private var defaultPage = 0
+        private var swipeHorizontal = false
+        private var annotationRendering = false
+        private var password: String? = null
+        private var scrollHandle: ScrollHandle? = null
+        private var antialiasing = true
+        private var spacing = 0f
+        private var autoSpacing = false
+        private var pageFitPolicy = FitPolicy.WIDTH
+        private var fitEachPage = false
+        private var pageFling = false
+        private var pageSnap = false
+        private var nightMode = false
+        fun pages(vararg pageNumbers: Int): Configurator {
+            this.pageNumbers = pageNumbers
+            return this
+        }
+
+        fun enableSwipe(enableSwipe: Boolean): Configurator {
+            this.enableSwipe = enableSwipe
+            return this
+        }
+
+        fun enableDoubletap(enableDoubletap: Boolean): Configurator {
+            this.enableDoubletap = enableDoubletap
+            return this
+        }
+
+        fun enableAnnotationRendering(annotationRendering: Boolean): Configurator {
+            this.annotationRendering = annotationRendering
+            return this
+        }
+
+        fun onDraw(onDrawListener: OnDrawListener?): Configurator {
+            this.onDrawListener = onDrawListener
+            return this
+        }
+
+        fun onDrawAll(onDrawAll: OnDrawListener?): Configurator {
+            this.onDrawAll = onDrawAll
+            return this
+        }
+
+        fun onLoad(onLoadCompleteListener: OnLoadCompleteListener?): Configurator {
+            this.onLoadCompleteListener = onLoadCompleteListener
+            return this
+        }
+
+        fun onPageScroll(onPageScrollListener: OnPageScrollListener?): Configurator {
+            this.onPageScrollListener = onPageScrollListener
+            return this
+        }
+
+        fun onError(onErrorListener: OnErrorListener?): Configurator {
+            this.onErrorListener = onErrorListener
+            return this
+        }
+
+        fun onPageError(onPageErrorListener: OnPageErrorListener?): Configurator {
+            this.onPageErrorListener = onPageErrorListener
+            return this
+        }
+
+        fun onPageChange(onPageChangeListener: OnPageChangeListener?): Configurator {
+            this.onPageChangeListener = onPageChangeListener
+            return this
+        }
+
+        fun onRender(onRenderListener: OnRenderListener?): Configurator {
+            this.onRenderListener = onRenderListener
+            return this
+        }
+
+        fun onTap(onTapListener: OnTapListener?): Configurator {
+            this.onTapListener = onTapListener
+            return this
+        }
+
+        fun onLongPress(onLongPressListener: OnLongPressListener?): Configurator {
+            this.onLongPressListener = onLongPressListener
+            return this
+        }
+
+        fun linkHandler(linkHandler: LinkHandler): Configurator {
+            this.linkHandler = linkHandler
+            return this
+        }
+
+        fun defaultPage(defaultPage: Int): Configurator {
+            this.defaultPage = defaultPage
+            return this
+        }
+
+        fun swipeHorizontal(swipeHorizontal: Boolean): Configurator {
+            this.swipeHorizontal = swipeHorizontal
+            return this
+        }
+
+        fun password(password: String?): Configurator {
+            this.password = password
+            return this
+        }
+
+        fun scrollHandle(scrollHandle: ScrollHandle?): Configurator {
+            this.scrollHandle = scrollHandle
+            return this
+        }
+
+        fun enableAntialiasing(antialiasing: Boolean): Configurator {
+            this.antialiasing = antialiasing
+            return this
+        }
+
+        fun spacing(spacing: Float): Configurator {
+            this.spacing = spacing
+            return this
+        }
+
+        fun autoSpacing(autoSpacing: Boolean): Configurator {
+            this.autoSpacing = autoSpacing
+            return this
+        }
+
+        fun pageFitPolicy(pageFitPolicy: FitPolicy): Configurator {
+            this.pageFitPolicy = pageFitPolicy
+            return this
+        }
+
+        fun fitEachPage(fitEachPage: Boolean): Configurator {
+            this.fitEachPage = fitEachPage
+            return this
+        }
+
+        fun pageSnap(pageSnap: Boolean): Configurator {
+            this.pageSnap = pageSnap
+            return this
+        }
+
+        fun pageFling(pageFling: Boolean): Configurator {
+            this.pageFling = pageFling
+            return this
+        }
+
+        fun nightMode(nightMode: Boolean): Configurator {
+            this.nightMode = nightMode
+            return this
+        }
+
+        fun disableLongpress(): Configurator {
+            this@PdfView.dragPinchManager!!.disableLongpress()
+            return this
+        }
+
+        fun load() {
+            if (!hasSize) {
+                waitingDocumentConfigurator = this
+                return
+            }
+            this@PdfView.recycle()
+            this@PdfView.callbacks.onLoadComplete = onLoadCompleteListener
+            this@PdfView.callbacks.onError = onErrorListener
+            this@PdfView.callbacks.onDraw = onDrawListener
+            this@PdfView.callbacks.onDrawAll = onDrawAll
+            this@PdfView.callbacks.onPageChange = onPageChangeListener
+            this@PdfView.callbacks.onPageScroll = onPageScrollListener
+            this@PdfView.callbacks.onRender = onRenderListener
+            this@PdfView.callbacks.onTap = onTapListener
+            this@PdfView.callbacks.onLongPress = onLongPressListener
+            this@PdfView.callbacks.onPageError = onPageErrorListener
+            this@PdfView.callbacks.linkHandler = linkHandler
+            this@PdfView.enableSwipe = enableSwipe
+            this@PdfView.nightMode = nightMode
+            this@PdfView.enableDoubletap(enableDoubletap)
+            this@PdfView.defaultPage = defaultPage
+            this@PdfView.swipeVertical = !swipeHorizontal
+            this@PdfView.annotationRendering = annotationRendering
+            this@PdfView.scrollHandle = scrollHandle
+            this@PdfView.enableAntialiasing = antialiasing
+            this@PdfView.spacing = spacing
+            this@PdfView.autoSpacing = autoSpacing
+            this@PdfView.pageFitPolicy = pageFitPolicy
+            this@PdfView.fitEachPage = fitEachPage
+            this@PdfView.pageSnap = pageSnap
+            this@PdfView.pageFling = pageFling
+            if (pageNumbers != null) {
+                this@PdfView.load(documentSource, password, pageNumbers)
+            } else {
+                this@PdfView.load(documentSource, password)
+            }
+        }
     }
 }
