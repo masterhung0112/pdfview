@@ -4,9 +4,30 @@ import android.util.SparseBooleanArray
 import com.hungknow.pdfsdk.models.Size
 import com.hungknow.pdfsdk.models.SizeF
 import com.hungknow.pdfsdk.utils.FitPolicy
-import java.util.*
 
-class PdfFile {
+class PdfFile(
+    val pdfiumSDK: PdfiumSDK,
+    var pdfDocument: PdfDocument?,
+    val pageFitPolicy: FitPolicy,
+    val viewSize: Size,
+    /**
+     * The pages the user want to display in order
+     * (ex: 0, 2, 2, 8, 8, 1, 1, 1)
+     */
+    var originalUserPages: List<Int>? = mutableListOf(),
+    /** True if scrolling is vertical, else it's horizontal  */
+    val isVertical: Boolean,
+    /** Fixed spacing between pages in pixels  */
+    val spacing: Float,
+    /** Calculate spacing automatically so each page fits on it's own in the center of the view  */
+    val autoSpacing: Boolean,
+    /**
+     * True if every page should fit separately according to the FitPolicy,
+     * else the largest page fits and other pages scale relatively
+     */
+    val fitEachPage: Boolean
+) {
+
     var pagesCount = 0
         private set
 
@@ -32,13 +53,13 @@ class PdfFile {
     private val maxWidthPageSize = SizeF(0f, 0f)
 
     /** True if scrolling is vertical, else it's horizontal  */
-    private val isVertical = false
+//    private val isVertical = false
 
     /** Fixed spacing between pages in pixels  */
-    private val spacingPx = 0
+//    private val spacingPx = 0
 
     /** Calculate spacing automatically so each page fits on it's own in the center of the view  */
-    private val autoSpacing = false
+//    private val autoSpacing = false
 
     /** Calculated offsets for pages  */
     private val pageOffsets = mutableListOf<Float>()
@@ -48,19 +69,19 @@ class PdfFile {
 
     /** Calculated document length (width or height, depending on swipe mode)  */
     private val documentLength = 0f
-    private val pageFitPolicy: FitPolicy? = null
+//    private val pageFitPolicy: FitPolicy? = null
 
     /**
      * True if every page should fit separately according to the FitPolicy,
      * else the largest page fits and other pages scale relatively
      */
-    private val fitEachPage = false
+//    private val fitEachPage = false
 
     /**
      * The pages the user want to display in order
      * (ex: 0, 2, 2, 8, 8, 1, 1, 1)
      */
-    private val originalUserPages = mutableListOf<Int>()
+//    private val originalUserPages = mutableListOf<Int>()
 
     val maxPageSize
         get() = if (isVertical) maxWidthPageSize else maxHeightPageSize
@@ -84,8 +105,8 @@ class PdfFile {
     }
 
     fun getPageSpacing(pageIndex: Int, zoom: Float): Float {
-        val spacing = if (autoSpacing) pageSpacing[pageIndex] else spacingPx
-        return spacing * zoom
+        val spacing = if (autoSpacing) pageSpacing[pageIndex] else spacing
+        return spacing.toFloat() * zoom
     }
 
     fun getPageOffset(pageIndex: Int, zoom: Float): Float {
@@ -100,10 +121,10 @@ class PdfFile {
     fun getSecondaryPageOffset(pageIndex: Int, zoom: Float): Float {
         val pageSize = getPageSize(pageIndex)
         return if (isVertical) {
-            val maxWidth: Float = getMaxPageWidth()
+            val maxWidth: Float = maxPageWidth
             zoom * (maxWidth - pageSize.width) / 2 //x
         } else {
-            val maxHeight: Float = getMaxPageHeight()
+            val maxHeight: Float = maxPageHeight
             zoom * (maxHeight - pageSize.height) / 2 //y
         }
     }
@@ -123,11 +144,11 @@ class PdfFile {
 
     fun documentPage(userPage: Int): Int {
         var documentPage = userPage
-        if (originalUserPages != null) {
+        originalUserPages?.let { originalUserPages ->
             if (userPage < 0 || userPage >= originalUserPages.size) {
                 return -1
             } else {
-                documentPage = originalUserPages.get(userPage)
+                documentPage = originalUserPages[userPage]
             }
         }
 
@@ -140,5 +161,15 @@ class PdfFile {
 
     fun getDocLen(zoom: Float): Float {
         return documentLength * zoom
+    }
+
+    fun dispose() {
+        pdfiumSDK?.let {pdfiumSDK ->
+            pdfDocument?.let { pdfDocument ->
+                pdfiumSDK.closeDocument(pdfDocument)
+            }
+        }
+        pdfDocument = null
+        originalUserPages = null
     }
 }

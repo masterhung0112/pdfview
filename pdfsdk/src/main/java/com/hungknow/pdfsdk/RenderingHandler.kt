@@ -9,8 +9,17 @@ import android.os.Looper
  * PDF is ready to render.
  */
 class RenderingHandler(looper: Looper, val pdfDocument: PdfDocument): Handler(looper) {
+    private var running = false
 
     companion object {
         val MSG_RENDER_TASK = 1
+    }
+
+    fun stop() {
+        running = false
+    }
+
+    fun start() {
+        running = true
     }
 }

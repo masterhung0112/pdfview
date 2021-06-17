@@ -9,6 +9,10 @@ class DragPinchManager(pdfView: PdfView, animationManager: AnimationManager): Ge
     private val gestureDetector = GestureDetector(pdfView.context, this)
     private val scaleGestureDetector = ScaleGestureDetector(pdfView.context, this)
 
+    private var scrolling = false
+    private var scaling = false
+    private var enabled = false
+
     fun disableLongpress() {
         gestureDetector.setIsLongpressEnabled(false)
     }
@@ -57,5 +61,13 @@ class DragPinchManager(pdfView: PdfView, animationManager: AnimationManager): Ge
 
     override fun onScaleEnd(detector: ScaleGestureDetector?) {
         TODO("Not yet implemented")
+    }
+
+    fun enable() {
+        enabled = true
+    }
+
+    fun disable() {
+        enabled = false
     }
 }

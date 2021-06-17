@@ -17,7 +17,7 @@ import com.hungknow.pdfsdk.utils.FitPolicy
 import com.hungknow.pdfsdk.utils.Utils
 
 
-class PdfView: RelativeLayout {
+class PdfView : RelativeLayout {
     companion object {
         private val TAG: String = PdfView::class.java.simpleName
 
@@ -37,8 +37,10 @@ class PdfView: RelativeLayout {
 
     lateinit var pdfiumSdk: PdfiumSDK
     lateinit var pagesLoader: PagesLoader
-    val callbacks = Callbacks()
+    var callbacks = Callbacks()
+
     private var scrollHandle: ScrollHandle? = null
+    private var isScrollHandleInit = false
 
     /**
      * START - scrolling in first page direction
@@ -55,7 +57,10 @@ class PdfView: RelativeLayout {
     val cacheManager = CacheManager()
 
     /** Drag manager manage all touch events */
-    var dragPinchManager: DragPinchManager? = null
+    lateinit var dragPinchManager: DragPinchManager
+
+    /** Animation manager manage all offset and zoom animation */
+    var animationManager = AnimationManager(this)
 
     /** The index of the current sequence */
     var currentPage = 0
@@ -100,10 +105,10 @@ class PdfView: RelativeLayout {
     private lateinit var pdfDocument: PdfDocument
 
     /** Paint object for drawing  */
-    private var paint: Paint? = null
+    private var paint = Paint()
 
     /** Paint object for drawing debug stuff  */
-    private var debugPaint: Paint? = null
+    private var debugPaint = Paint()
 
     /**
      * True if bitmap should use ARGB_8888 format and take more memory
@@ -133,11 +138,13 @@ class PdfView: RelativeLayout {
     private var nightMode = false
 
     /** Spacing between pages, in px  */
-    private var spacing = 0f
-        set(value) { Utils.getDP(context.resources.displayMetrics, value) }
+    var spacing = 0f
+        set(value) {
+            Utils.getDP(context.resources.displayMetrics, value)
+        }
 
     /** Add dynamic spacing to fit each page separately on the screen.  */
-    private var autoSpacing = false
+    var autoSpacing = false
 
     /** Fling a single page at a time  */
     private var pageFling = true
@@ -152,9 +159,10 @@ class PdfView: RelativeLayout {
     private var waitingDocumentConfigurator: Configurator? = null
 
     /** Policy for fitting pages to screen  */
-    private var pageFitPolicy = FitPolicy.WIDTH
+    var pageFitPolicy = FitPolicy.WIDTH
+        private set
 
-    private var fitEachPage = false
+    var fitEachPage = false
 
     private var defaultPage = 0
 
@@ -164,13 +172,16 @@ class PdfView: RelativeLayout {
 
     private var pageSnap = true
 
-    constructor(context: Context, set: AttributeSet): super(context) {
+    constructor(context: Context, set: AttributeSet) : super(context) {
         if (isInEditMode) {
             return
         }
 
         pagesLoader = PagesLoader(this)
         pdfiumSdk = PdfiumSDK(context.resources.displayMetrics.densityDpi)
+        dragPinchManager = DragPinchManager(this, animationManager)
+
+        debugPaint.style = Paint.Style.STROKE
         setWillNotDraw(false)
     }
 
@@ -178,12 +189,12 @@ class PdfView: RelativeLayout {
         load(docSource, password, null)
     }
 
-    private fun load(docSource: DocumentSource, password: String, userPages: IntArray?) {
+    private fun load(docSource: DocumentSource, password: String, userPages: List<Int>?) {
         check(recycled) { "Don't call load on a PDF View without recycling it first." }
         recycled = false
         // Start decoding document
         decodingAsyncTask = DecodingAsyncTask(docSource, password, userPages, this, pdfiumSdk)
-        decodingAsyncTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR)
+        decodingAsyncTask!!.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR)
     }
 
     fun showPage(pageNb: Int) {
@@ -201,7 +212,7 @@ class PdfView: RelativeLayout {
             scrollHandle!!.setPageNum(currentPage + 1)
         }
 
-        callbacks.callOnPageChange(currentPage, pdfFile.pagesCount)
+        callbacks.callOnPageChange(currentPage, pdfFile!!.pagesCount)
     }
 
     /**
@@ -260,8 +271,9 @@ class PdfView: RelativeLayout {
         for (part in cacheManager.pageParts) {
             drawPart(canvas, part)
             if (callbacks.onDrawAll != null
-                && !onDrawPagesNums.contains(part.page)) {
-                onDrawPagesNums.add(part.page);
+                && !onDrawPagesNums.contains(part.page)
+            ) {
+                onDrawPagesNums.add(part.page)
             }
         }
 
@@ -290,7 +302,12 @@ class PdfView: RelativeLayout {
 
             canvas.translate(translateX, translateY)
             val size = pdfFile!!.getPageSize(page)
-            listener.onLayerDrawn(canvas, toCurrentScale(size.width), toCurrentScale(size.height), page)
+            listener.onLayerDrawn(
+                canvas,
+                toCurrentScale(size.width),
+                toCurrentScale(size.height),
+                page
+            )
             canvas.translate(-translateX, -translateY)
         }
     }
@@ -330,12 +347,17 @@ class PdfView: RelativeLayout {
         // If we use float values for this rectangle, there will be
         // a possible gap between page parts, especially when
         // the zoom level is high.
-        val dstRect = Rect(offsetX.toInt(), offsetY.toInt(), (offsetX + width).toInt(), (offsetY + height).toInt())
+        val dstRect = Rect(
+            offsetX.toInt(),
+            offsetY.toInt(),
+            (offsetX + width).toInt(),
+            (offsetY + height).toInt()
+        )
 
         canvas.drawBitmap(renderedBitmap, srcRect, dstRect, paint)
 
         if (DEBUG_MODE) {
-            debugPaint!!.color = if (part.page % 2 === 0) Color.RED else Color.BLUE
+            debugPaint.color = if (part.page % 2 === 0) Color.RED else Color.BLUE
             canvas.drawRect(dstRect, debugPaint)
         }
 
@@ -390,12 +412,52 @@ class PdfView: RelativeLayout {
         }
     }
 
+    fun recycle() {
+        waitingDocumentConfigurator = null
+        animationManager.stopAll()
+        dragPinchManager.disable()
+
+        // Stop tasks
+        renderingHandler?.let {
+            it.stop()
+            it.removeMessages(RenderingHandler.MSG_RENDER_TASK)
+        }
+
+        decodingAsyncTask?.let {
+            it.cancel(true)
+        }
+
+        // Clear caches
+        cacheManager.recycle()
+
+        scrollHandle?.let {
+            if (isScrollHandleInit) {
+                it.destroyLayout()
+            }
+        }
+
+        pdfFile?.let {
+            it.dispose()
+        }
+        pdfFile = null
+
+        renderingHandler = null
+        scrollHandle = null
+        isScrollHandleInit = false
+        currentXOffset = 0f
+        currentYOffset = 0f
+        zoom = 1f
+        recycled = true
+        callbacks = Callbacks()
+        state = State.DEFAULT
+    }
+
     private enum class State {
         DEFAULT, LOADED, SHOWN, ERROR
     }
 
     inner class Configurator private constructor(val documentSource: DocumentSource) {
-        private var pageNumbers: IntArray? = null
+        private var pageNumbers: List<Int>? = null
         private var enableSwipe = true
         private var enableDoubletap = true
         private var onDrawListener: OnDrawListener? = null
@@ -408,7 +470,7 @@ class PdfView: RelativeLayout {
         private var onTapListener: OnTapListener? = null
         private var onLongPressListener: OnLongPressListener? = null
         private var onPageErrorListener: OnPageErrorListener? = null
-        private var linkHandler: LinkHandler = DefaultLinkHandler(this)
+        private var linkHandler: LinkHandler = DefaultLinkHandler(this@PdfView)
         private var defaultPage = 0
         private var swipeHorizontal = false
         private var annotationRendering = false
@@ -423,7 +485,7 @@ class PdfView: RelativeLayout {
         private var pageSnap = false
         private var nightMode = false
         fun pages(vararg pageNumbers: Int): Configurator {
-            this.pageNumbers = pageNumbers
+            this.pageNumbers = pageNumbers.asList()
             return this
         }
 
@@ -558,7 +620,7 @@ class PdfView: RelativeLayout {
         }
 
         fun disableLongpress(): Configurator {
-            this@PdfView.dragPinchManager!!.disableLongpress()
+            this@PdfView.dragPinchManager.disableLongpress()
             return this
         }
 
@@ -593,10 +655,14 @@ class PdfView: RelativeLayout {
             this@PdfView.fitEachPage = fitEachPage
             this@PdfView.pageSnap = pageSnap
             this@PdfView.pageFling = pageFling
-            if (pageNumbers != null) {
-                this@PdfView.load(documentSource, password, pageNumbers)
-            } else {
-                this@PdfView.load(documentSource, password)
+            val usedPassword = this.password ?: ""
+
+            pageNumbers.let {
+                if (it != null) {
+                    this@PdfView.load(documentSource, usedPassword, it)
+                } else {
+                    this@PdfView.load(documentSource, usedPassword)
+                }
             }
         }
     }
