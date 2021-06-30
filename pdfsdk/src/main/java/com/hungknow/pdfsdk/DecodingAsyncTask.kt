@@ -16,7 +16,7 @@ class DecodingAsyncTask(val docSource: DocumentSource, val password: String, val
             val pdfView = pdfViewReference.get()
             if (pdfView != null) {
                 val pdfDocument =
-                    docSource.createDocument(pdfView.getContext(), pdfiumSDK, password)
+                    docSource.createDocument(pdfView.context, pdfiumSDK, password)
                 pdfFile = PdfFile(
                     pdfiumSDK,
                     pdfDocument,
@@ -43,5 +43,25 @@ class DecodingAsyncTask(val docSource: DocumentSource, val password: String, val
 
     override fun onCancelled() {
         cancelled = true
+    }
+
+    override fun onPostExecute(result: Throwable?) {
+        val pdfView = pdfViewReference.get()
+        pdfView?.let {pdfView ->
+            if (result != null) {
+                pdfView.loadError(result)
+                return
+            }
+
+            if (!cancelled) {
+                pdfFile.let {
+                    if (it != null) {
+                        pdfView.loadComplete(it)
+                    } else {
+                        pdfView.loadError(Exception("pdfFile not created"))
+                    }
+                }
+            }
+        }
     }
 }

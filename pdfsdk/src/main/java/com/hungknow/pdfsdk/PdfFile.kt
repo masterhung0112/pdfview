@@ -1,9 +1,13 @@
 package com.hungknow.pdfsdk
 
+import android.graphics.Bitmap
+import android.graphics.Rect
 import android.util.SparseBooleanArray
+import com.hungknow.pdfsdk.exceptions.PageRenderingException
 import com.hungknow.pdfsdk.models.Size
 import com.hungknow.pdfsdk.models.SizeF
 import com.hungknow.pdfsdk.utils.FitPolicy
+import java.util.*
 
 class PdfFile(
     val pdfiumSDK: PdfiumSDK,
@@ -27,6 +31,9 @@ class PdfFile(
      */
     val fitEachPage: Boolean
 ) {
+    companion object {
+        val lock = Any()
+    }
 
     var pagesCount = 0
         private set
@@ -171,5 +178,37 @@ class PdfFile(
         }
         pdfDocument = null
         originalUserPages = null
+    }
+
+    fun openPage(pageIndex: Int): Boolean {
+        val docPage = documentPage(pageIndex)
+        if (docPage < 1) {
+            return false
+        }
+
+        synchronized(lock) {
+            if (openedPages.indexOfKey(docPage) < 0) {
+                try {
+                    val pdfDocument = this.pdfDocument ?: return false
+                    pdfiumSDK.openPage(pdfDocument, docPage)
+                    openedPages.put(docPage, true)
+                    return true
+                } catch (e: Exception) {
+                    openedPages.put(docPage, false)
+                    throw PageRenderingException(pageIndex, e)
+                }
+            }
+            return false
+        }
+    }
+
+    fun pageHasError(pageIndex: Int): Boolean {
+        val docPage = documentPage(pageIndex)
+        return !openedPages.get(docPage, false)
+    }
+
+    fun renderPageBitmap(bitmap: Bitmap, pageIndex: Int, bounds: Rect, annotationRendering: Boolean) {
+        val docPage = documentPage(pageIndex)
+        pdfiumSDK.renderPageBitmap(pdfDocument, bitmap, docPage, bounds.left, bounds.top, bounds.width(), bounds.height(), annotationRendering)
     }
 }

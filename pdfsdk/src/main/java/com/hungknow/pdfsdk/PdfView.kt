@@ -5,6 +5,7 @@ import android.graphics.*
 import android.os.AsyncTask
 import android.os.HandlerThread
 import android.util.AttributeSet
+import android.util.Log
 import android.widget.RelativeLayout
 import com.hungknow.pdfsdk.link.DefaultLinkHandler
 import com.hungknow.pdfsdk.link.LinkHandler
@@ -450,6 +451,43 @@ class PdfView : RelativeLayout {
         recycled = true
         callbacks = Callbacks()
         state = State.DEFAULT
+    }
+
+    fun loadError(t: Throwable) {
+        state = State.ERROR
+
+        // store reference, because callbacks will be cleared in recycle() method
+        var onErrorListener = callbacks.onError
+        recycle()
+        invalidate()
+        if (onErrorListener != null) {
+            onErrorListener.onError(t)
+        } else {
+            Log.e("PdfView", "load pdf error", t)
+        }
+    }
+
+    fun loadComplete(pdfFile: PdfFile) {
+        state = State.LOADED
+        this.pdfFile = pdfFile
+
+        if (!renderingHandlerThread.isAlive) {
+            renderingHandlerThread.start()
+        }
+
+        renderingHandler = RenderingHandler(renderingHandlerThread.looper, this)
+        renderingHandler!!.start()
+
+        scrollHandle?.let {
+            it.setupLayout(this)
+            isScrollHandleInit = true
+        }
+
+        dragPinchManager.enable()
+
+        callbacks.callOnLoadComplete(pdfFile.pagesCount)
+
+        jumpTo(defaultPage, false)
     }
 
     private enum class State {

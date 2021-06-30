@@ -1,8 +1,13 @@
 package com.hungknow.pdfsdk
 
-import android.content.Context
+import android.R.attr
+import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.util.Log
+import android.view.Surface
+import java.io.FileDescriptor
 import java.io.IOException
+
 
 class PdfiumSDK(val densityDpi: Int) {
 
@@ -14,6 +19,15 @@ class PdfiumSDK(val densityDpi: Int) {
     private external fun nativeLoadPage(documentPtr: Long, pageIndex: Int): Long
     private external fun nativeClosePage(pagePtr: Long)
     private external fun nativeClosePages(pagesPtr: LongArray)
+    private external fun nativeRenderPage(pagePtr: Long, surface: Surface, dpi: Int,
+                                          startX: Int, startY: Int,
+                                          drawSizeHor: Int, drawSizeVer: Int,
+                                          renderAnnot: Boolean)
+
+    private external fun nativeRenderPageBitmap(pagePtr: Long, bitmap: Bitmap, dpi: Int,
+    startX: Int, startY: Int,
+    drawSizeHor: Int, drawSizeVer: Int,
+    renderAnnot: Boolean)
 
     ///////////////////////////////////////
     // PDF TextPage api
@@ -63,7 +77,36 @@ class PdfiumSDK(val densityDpi: Int) {
         return pagePtr
     }
 
+    // Render page fragment on Bitmap. page must be opened before rendering
+    // ARGB_8888 - best quality, high memory usage, higher possibility of OutOfMemoryError
+    // RGB_565 - little worse quality, twice less memory usage
+    fun renderPageBitmap(doc: PdfDocument, bitmap: Bitmap, pageIndex: Int, startX: Int, startY: Int, drawSizeX: Int, drawSizeY: Int) {
+        renderPageBitmap(doc, bitmap, pageIndex, startX, startY, drawSizeX, drawSizeY, false);
+    }
+
+    fun renderPageBitmap(doc: PdfDocument, bitmap: Bitmap, pageIndex: Int, startX: Int, startY: Int, drawSizeX: Int, drawSizeY: Int, renderAnnot: Boolean) {
+        synchronized(lock) {
+            try {
+                nativeRenderPageBitmap(
+                    doc.mNativePagesPtr.get(pageIndex), attr.bitmap, mCurrentDpi,
+                    attr.startX, attr.startY, drawSizeX, drawSizeY, renderAnnot
+                )
+            } catch (e: NullPointerException) {
+                Log.e(TAG, "mContext may be null")
+                e.printStackTrace()
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception throw from native")
+                e.printStackTrace()
+            }
+        }
+    }
+
     companion object {
+        val lock = Any()
+        val TAG = PdfiumSDK::class.simpleName
+        val FD_CLASS = FileDescriptor::class
+        val FD_FIELD_NAME = "descriptor"
+
         init {
             System.loadLibrary("pdfsdk")
             System.loadLibrary("pdfsdk_jni")
