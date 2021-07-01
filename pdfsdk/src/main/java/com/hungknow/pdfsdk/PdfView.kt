@@ -12,9 +12,12 @@ import com.hungknow.pdfsdk.link.LinkHandler
 import com.hungknow.pdfsdk.listeners.*
 import com.hungknow.pdfsdk.models.PagePart
 import com.hungknow.pdfsdk.scroll.ScrollHandle
+import com.hungknow.pdfsdk.source.AssetSource
 import com.hungknow.pdfsdk.source.DocumentSource
 import com.hungknow.pdfsdk.utils.Constants.Companion.DEBUG_MODE
 import com.hungknow.pdfsdk.utils.FitPolicy
+import com.hungknow.pdfsdk.utils.MathUtils
+import com.hungknow.pdfsdk.utils.SnapEdge
 import com.hungknow.pdfsdk.utils.Utils
 
 
@@ -40,7 +43,7 @@ class PdfView : RelativeLayout {
     lateinit var pagesLoader: PagesLoader
     var callbacks = Callbacks()
 
-    private var scrollHandle: ScrollHandle? = null
+    var scrollHandle: ScrollHandle? = null
     private var isScrollHandleInit = false
 
     /**
@@ -52,7 +55,7 @@ class PdfView : RelativeLayout {
         NONE, START, END
     }
 
-    private val scrollDir = ScrollDir.NONE
+    private var scrollDir = ScrollDir.NONE
 
     /** Rendered parts go to the cache manager  */
     val cacheManager = CacheManager()
@@ -139,7 +142,7 @@ class PdfView : RelativeLayout {
     private var nightMode = false
 
     /** Spacing between pages, in px  */
-    var spacing = 0f
+    var spacing = 0
         set(value) {
             Utils.getDP(context.resources.displayMetrics, value)
         }
@@ -231,6 +234,120 @@ class PdfView : RelativeLayout {
         cacheManager.makeANewSet()
         pagesLoader.loadPages()
         invalidate()
+    }
+
+    /**
+     * Animate to the nearest snapping position for the current SnapPolicy
+     */
+    fun performPageSnap() {
+        if (!pageSnap || pdfFile == null || pdfFile!!.pagesCount == 0) {
+            return
+        }
+        val centerPage: Int = findFocusPage(currentXOffset, currentYOffset)
+        val edge: SnapEdge = findSnapEdge(centerPage)
+        if (edge === SnapEdge.NONE) {
+            return
+        }
+        val offset: Float = snapOffsetForPage(centerPage, edge)
+        if (swipeVertical) {
+            animationManager.startYAnimation(currentYOffset, -offset)
+        } else {
+            animationManager.startXAnimation(currentXOffset, -offset)
+        }
+    }
+
+    /**
+     * Find the edge to snap to when showing the specified page
+     */
+    fun findSnapEdge(page: Int): SnapEdge {
+        if (!pageSnap || page < 0) {
+            return SnapEdge.NONE
+        }
+        val currentOffset = if (swipeVertical) currentYOffset else currentXOffset
+        val offset = -pdfFile!!.getPageOffset(page, zoom)
+        val length = if (swipeVertical) height else width
+        val pageLength: Float = pdfFile!!.getPageLength(page, zoom)
+        return if (length >= pageLength) {
+            SnapEdge.CENTER
+        } else if (currentOffset >= offset) {
+            SnapEdge.START
+        } else if (offset - pageLength > currentOffset - length) {
+            SnapEdge.END
+        } else {
+            SnapEdge.NONE
+        }
+    }
+
+    /**
+     * Get the offset to move to in order to snap to the page
+     */
+    fun snapOffsetForPage(pageIndex: Int, edge: SnapEdge): Float {
+        var offset = pdfFile!!.getPageOffset(pageIndex, zoom)
+        val length = if (swipeVertical) height.toFloat() else width.toFloat()
+        val pageLength: Float = pdfFile!!.getPageLength(pageIndex, zoom)
+        if (edge === SnapEdge.CENTER) {
+            offset = offset - length / 2f + pageLength / 2f
+        } else if (edge === SnapEdge.END) {
+            offset = offset - length + pageLength
+        }
+        return offset
+    }
+
+    fun findFocusPage(xOffset: Float, yOffset: Float): Int {
+        val currOffset = if (swipeVertical) yOffset else xOffset
+        val length = if (swipeVertical) height.toFloat() else width.toFloat()
+        // make sure first and last page can be found
+        if (currOffset > -1) {
+            return 0
+        } else if (currOffset < -pdfFile!!.getDocLen(zoom) + length + 1) {
+            return pdfFile!!.pagesCount - 1
+        }
+        // else find page in center
+        val center = currOffset - length / 2f
+        return pdfFile!!.getPageAtOffset(-center, zoom)
+    }
+
+    /**
+     * Move relatively to the current position.
+     *
+     * @param dx The X difference you want to apply.
+     * @param dy The Y difference you want to apply.
+     * @see .moveTo
+     */
+    fun moveRelativeTo(dx: Float, dy: Float) {
+        moveTo(currentXOffset + dx, currentYOffset + dy)
+    }
+
+    /**
+     * Change the zoom level
+     */
+    fun zoomTo(zoom: Float) {
+        this.zoom = zoom
+    }
+
+    /**
+     * Change the zoom level, relatively to a pivot point.
+     * It will call moveTo() to make sure the given point stays
+     * in the middle of the screen.
+     *
+     * @param zoom  The zoom level.
+     * @param pivot The point on the screen that should stays.
+     */
+    fun zoomCenteredTo(zoom: Float, pivot: PointF) {
+        val dzoom = zoom / this.zoom
+        zoomTo(zoom)
+        var baseX = currentXOffset * dzoom
+        var baseY = currentYOffset * dzoom
+        baseX += pivot.x - pivot.x * dzoom
+        baseY += pivot.y - pivot.y * dzoom
+        moveTo(baseX, baseY)
+    }
+
+    /**
+     * @see .zoomCenteredTo
+     */
+    fun zoomCenteredRelativeTo(dzoom: Float, pivot: PointF) {
+        zoomCenteredTo(zoom * dzoom, pivot)
     }
 
     override fun onDraw(canvas: Canvas?) {
@@ -467,6 +584,135 @@ class PdfView : RelativeLayout {
         }
     }
 
+    /**
+     * Called when a rendering task is over and
+     * a PagePart has been freshly created.
+     *
+     * @param part The created PagePart.
+     */
+    fun onBitmapRendered(part: PagePart) {
+        // when it is first rendered part
+        if (state === State.LOADED) {
+            state = State.SHOWN
+            callbacks.callOnRender(pdfFile!!.pagesCount)
+        }
+        if (part.thumbnail) {
+            cacheManager.cacheThumbnail(part)
+        } else {
+            cacheManager.cachePart(part)
+        }
+        invalidate()
+    }
+
+    fun moveTo(offsetX: Float, offsetY: Float) {
+        moveTo(offsetX, offsetY, true)
+    }
+
+    /**
+     * Move to the given X and Y offsets, but check them ahead of time
+     * to be sure not to go outside the the big strip.
+     *
+     * @param offsetX    The big strip X offset to use as the left border of the screen.
+     * @param offsetY    The big strip Y offset to use as the right border of the screen.
+     * @param moveHandle whether to move scroll handle or not
+     */
+    fun moveTo(offsetX: Float, offsetY: Float, moveHandle: Boolean) {
+        var offsetX = offsetX
+        var offsetY = offsetY
+        if (swipeVertical) {
+            // Check X offset
+            val scaledPageWidth = toCurrentScale(pdfFile!!.maxPageWidth)
+            if (scaledPageWidth < width) {
+                offsetX = width / 2 - scaledPageWidth / 2
+            } else {
+                if (offsetX > 0) {
+                    offsetX = 0f
+                } else if (offsetX + scaledPageWidth < width) {
+                    offsetX = width - scaledPageWidth
+                }
+            }
+
+            // Check Y offset
+            val contentHeight = pdfFile!!.getDocLen(zoom)
+            if (contentHeight < height) { // whole document height visible on screen
+                offsetY = (height - contentHeight) / 2
+            } else {
+                if (offsetY > 0) { // top visible
+                    offsetY = 0f
+                } else if (offsetY + contentHeight < height) { // bottom visible
+                    offsetY = -contentHeight + height
+                }
+            }
+            scrollDir = if (offsetY < currentYOffset) {
+                ScrollDir.END
+            } else if (offsetY > currentYOffset) {
+                ScrollDir.START
+            } else {
+                ScrollDir.NONE
+            }
+        } else {
+            // Check Y offset
+            val scaledPageHeight = toCurrentScale(pdfFile!!.maxPageHeight)
+            if (scaledPageHeight < height) {
+                offsetY = height / 2 - scaledPageHeight / 2
+            } else {
+                if (offsetY > 0) {
+                    offsetY = 0f
+                } else if (offsetY + scaledPageHeight < height) {
+                    offsetY = height - scaledPageHeight
+                }
+            }
+
+            // Check X offset
+            val contentWidth = pdfFile!!.getDocLen(zoom)
+            if (contentWidth < width) { // whole document width visible on screen
+                offsetX = (width - contentWidth) / 2
+            } else {
+                if (offsetX > 0) { // left visible
+                    offsetX = 0f
+                } else if (offsetX + contentWidth < width) { // right visible
+                    offsetX = -contentWidth + width
+                }
+            }
+            scrollDir = if (offsetX < currentXOffset) {
+                ScrollDir.END
+            } else if (offsetX > currentXOffset) {
+                ScrollDir.START
+            } else {
+                ScrollDir.NONE
+            }
+        }
+        currentXOffset = offsetX
+        currentYOffset = offsetY
+        val positionOffset = getPositionOffset()
+        if (moveHandle && scrollHandle != null && !documentFitsView()) {
+            scrollHandle!!.setScroll(positionOffset)
+        }
+        callbacks.callOnPageScroll(currentPage, positionOffset)
+        invalidate()
+    }
+
+    fun loadPageByOffset() {
+        if (0 == pdfFile!!.pagesCount) {
+            return
+        }
+        val offset: Float
+        val screenCenter: Float
+        if (swipeVertical) {
+            offset = currentYOffset
+            screenCenter = height.toFloat() / 2
+        } else {
+            offset = currentXOffset
+            screenCenter = width.toFloat() / 2
+        }
+        val page = pdfFile!!.getPageAtOffset(-(offset - screenCenter), zoom)
+        if (page >= 0 && page <= pdfFile!!.pagesCount - 1 && page != currentPage) {
+            showPage(page)
+        } else {
+            loadPages()
+        }
+    }
+
     fun loadComplete(pdfFile: PdfFile) {
         state = State.LOADED
         this.pdfFile = pdfFile
@@ -490,11 +736,85 @@ class PdfView : RelativeLayout {
         jumpTo(defaultPage, false)
     }
 
+    /**
+     * Get current position as ratio of document length to visible area.
+     * 0 means that document start is visible, 1 that document end is visible
+     *
+     * @return offset between 0 and 1
+     */
+    fun getPositionOffset(): Float {
+        val offset: Float
+        offset = if (swipeVertical) {
+            -currentYOffset / (pdfFile!!.getDocLen(zoom) - height)
+        } else {
+            -currentXOffset / (pdfFile!!.getDocLen(zoom) - width)
+        }
+        return MathUtils.limit(offset, 0f, 1f)
+    }
+
+    /**
+     * @param progress   must be between 0 and 1
+     * @param moveHandle whether to move scroll handle
+     * @see PDFView.getPositionOffset
+     */
+    fun setPositionOffset(progress: Float, moveHandle: Boolean) {
+        if (swipeVertical) {
+            moveTo(currentXOffset, (-pdfFile!!.getDocLen(zoom) + height) * progress, moveHandle)
+        } else {
+            moveTo((-pdfFile!!.getDocLen(zoom) + width) * progress, currentYOffset, moveHandle)
+        }
+        loadPageByOffset()
+    }
+
+    fun setPositionOffset(progress: Float) {
+        setPositionOffset(progress, true)
+    }
+
+    fun stopFling() {
+        animationManager.stopFling()
+    }
+
+    fun getPageCount(): Int {
+        return if (pdfFile == null) {
+            0
+        } else pdfFile!!.pagesCount
+    }
+
+    /** Use an asset file as the pdf source  */
+    fun fromAsset(assetName: String): Configurator {
+        return Configurator(AssetSource(assetName))
+    }
+
+    /** Use a file as the pdf source  */
+//    fun fromFile(file: File): Configurator {
+//        return Configurator(FileSource(file))
+//    }
+
+    /** Use URI as the pdf source, for use with content providers  */
+//    fun fromUri(uri: Uri): Configurator {
+//        return Configurator(UriSource(uri))
+//    }
+
+    /** Use bytearray as the pdf source, documents is not saved  */
+//    fun fromBytes(bytes: ByteArray): Configurator {
+//        return Configurator(ByteArraySource(bytes))
+//    }
+
+    /** Use stream as the pdf source. Stream will be written to bytearray, because native code does not support Java Streams  */
+//    fun fromStream(stream: InputStream): Configurator {
+//        return Configurator(InputStreamSource(stream))
+//    }
+
+    /** Use custom source as pdf source  */
+    fun fromSource(docSource: DocumentSource): Configurator {
+        return Configurator(docSource!!)
+    }
+
     private enum class State {
         DEFAULT, LOADED, SHOWN, ERROR
     }
 
-    inner class Configurator private constructor(val documentSource: DocumentSource) {
+    inner class Configurator constructor(val documentSource: DocumentSource) {
         private var pageNumbers: List<Int>? = null
         private var enableSwipe = true
         private var enableDoubletap = true

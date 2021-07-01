@@ -170,6 +170,14 @@ class PdfFile(
         return documentLength * zoom
     }
 
+    /**
+     * Get the page's height if swiping vertical, or width if swiping horizontal.
+     */
+    fun getPageLength(pageIndex: Int, zoom: Float): Float {
+        val size = getPageSize(pageIndex)
+        return (if (isVertical) size.height else size.width) * zoom
+    }
+
     fun dispose() {
         pdfiumSDK?.let {pdfiumSDK ->
             pdfDocument?.let { pdfDocument ->
