@@ -34,6 +34,10 @@ class PdfiumSDK(val densityDpi: Int) {
     ///////////
     private external fun nativeCloseTextPage(pagePtr: Long)
 
+    fun getPageCount(doc: PdfDocument): Int {
+       return nativeGetPageCount(doc.NativeDocPtr)
+    }
+
     fun newDocument(pfd: ParcelFileDescriptor, password: String): PdfDocument {
         val nativeDocumentPtr = nativeOpenDocument(pfd.fd, password)
         return PdfDocument(nativeDocumentPtr, pfd)
@@ -87,10 +91,12 @@ class PdfiumSDK(val densityDpi: Int) {
     fun renderPageBitmap(doc: PdfDocument, bitmap: Bitmap, pageIndex: Int, startX: Int, startY: Int, drawSizeX: Int, drawSizeY: Int, renderAnnot: Boolean) {
         synchronized(lock) {
             try {
-                nativeRenderPageBitmap(
-                    doc.mNativePagesPtr.get(pageIndex), attr.bitmap, mCurrentDpi,
-                    attr.startX, attr.startY, drawSizeX, drawSizeY, renderAnnot
-                )
+                doc.NativePagesPtr[pageIndex]?.let {
+                    nativeRenderPageBitmap(
+                        it, bitmap, mCurrentDpi,
+                        startX, startY, drawSizeX, drawSizeY, renderAnnot
+                    )
+                }
             } catch (e: NullPointerException) {
                 Log.e(TAG, "mContext may be null")
                 e.printStackTrace()
@@ -106,6 +112,7 @@ class PdfiumSDK(val densityDpi: Int) {
         val TAG = PdfiumSDK::class.simpleName
         val FD_CLASS = FileDescriptor::class
         val FD_FIELD_NAME = "descriptor"
+        val mCurrentDpi = 72
 
         init {
             System.loadLibrary("pdfsdk")

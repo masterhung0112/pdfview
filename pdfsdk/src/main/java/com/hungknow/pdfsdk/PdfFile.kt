@@ -208,6 +208,7 @@ class PdfFile(
     }
 
     fun renderPageBitmap(bitmap: Bitmap, pageIndex: Int, bounds: Rect, annotationRendering: Boolean) {
+        val pdfDocument = this.pdfDocument ?: return
         val docPage = documentPage(pageIndex)
         pdfiumSDK.renderPageBitmap(pdfDocument, bitmap, docPage, bounds.left, bounds.top, bounds.width(), bounds.height(), annotationRendering)
     }

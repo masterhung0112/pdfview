@@ -15,7 +15,7 @@ class PdfiumSDKTest {
         val f = FileUtils.getFileFromPath(this, "sample.pdf")
         val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
 
-        var documentFd = PdfiumSDK().nativeOpenDocument(pfd.fd, "password")
+        var documentFd = PdfiumSDK(72).nativeOpenDocument(pfd.fd, "password")
         Assert.assertNotEquals(-1, documentFd)
     }
 }
