@@ -1,5 +1,7 @@
 package com.hungknow.pdfview
 
+import android.content.res.Resources
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.ParcelFileDescriptor.MODE_READ_ONLY
@@ -34,17 +36,6 @@ class MainActivity : AppCompatActivity() {
             Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
                 .setAction("Action", null).show()
         }
-
-        decodePDFPage()
-    }
-
-    fun decodePDFPage() {
-        val pdfFile = (application as SamplesApplication).createNewSampleFile("Sample.pdf")
-        val fileDescriptor = ParcelFileDescriptor.open(pdfFile, MODE_READ_ONLY)
-        val sdk = PdfiumSDK(72)
-        val pdfDocument = sdk.newDocument(fileDescriptor, "")
-
-        Log.d("PDFSDK", "Page count: " + sdk.getPageCount(pdfDocument))
     }
 
     override fun onSupportNavigateUp(): Boolean {

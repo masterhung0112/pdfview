@@ -9,6 +9,8 @@
 #include <hk_file.h>
 #include <public/cpp/fpdf_scopers.h>
 
+#include <android/bitmap.h>
+
 template<class string_type>
 inline typename string_type::value_type *WriteInto(string_type *str, size_t length_with_null) {
     str->reserve(length_with_null);
@@ -104,6 +106,47 @@ int jniThrowException(JNIEnv *env, const char *className, const char *message) {
     }
 
     return 0;
+}
+
+struct rgb {
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+};
+
+jobject NewLong(JNIEnv *env, jlong value) {
+    jclass cls = env->FindClass("java/lang/Long");
+    jmethodID methodID = env->GetMethodID(cls, "<init>", "(J)V");
+    return env->NewObject(cls, methodID, value);
+}
+
+jobject NewInteger(JNIEnv *env, jint value) {
+    jclass cls = env->FindClass("java/lang/Integer");
+    jmethodID methodID = env->GetMethodID(cls, "<init>", "(I)V");
+    return env->NewObject(cls, methodID, value);
+}
+
+uint16_t rgb_to_565(unsigned char R8, unsigned char G8, unsigned char B8) {
+    unsigned char R5 = (R8 * 249 + 1014) >> 11;
+    unsigned char G6 = (G8 * 253 + 505) >> 10;
+    unsigned char B5 = (B8 * 249 + 1014) >> 11;
+    return (R5 << 11) | (G6 << 5) | (B5);
+}
+
+void rgbBitmapTo565(void *source, int sourceStride, void *dest, AndroidBitmapInfo *info) {
+    rgb *srcLine;
+    uint16_t *dstLine;
+    int y, x;
+    for (y = 0; y < info->height; y++) {
+        srcLine = (rgb *) source;
+        dstLine = (uint16_t *) dest;
+        for (x = 0; x < info->width; x++) {
+            rgb *r = &srcLine[x];
+            dstLine[x] = rgb_to_565(r->red, r->green, r->blue);
+        }
+        source = (char *) source + sourceStride;
+        dest = (char *) dest + info->stride;
+    }
 }
 
 class DocumentFile {
@@ -274,6 +317,107 @@ JNI_FUNC(void, PdfiumSDK, nativeClosePages)(JNI_ARGS, jlongArray pagesPtr) {
     for (i = 0; i < length; i++) { closePageInternal(pages[i]); }
 }
 
+JNI_FUNC(jobject, PdfiumSDK, nativeGetPageSizeByIndex)(JNI_ARGS, jlong docPtr, jint pageIndex, jint dpi) {
+    DocumentFile *doc = reinterpret_cast<DocumentFile*>(docPtr);
+    if (doc == NULL) {
+        LOGE("Document is null");
+        jniThrowException(env, "java/lang/IllegalStateException", "Document is null");
+        return NULL;
+    }
+
+    double width, height;
+    int result = FPDF_GetPageSizeByIndex(doc->pdfDocument.get(), pageIndex, &width, &height);
+    if (result == 0) {
+        width = 0;
+        height = 0;
+    }
+    jint widthInt = (jint) (width * dpi / 72);
+    jint heightInt = (jint) (height * dpi / 72);
+    jclass clazz = env->FindClass("com/hungknow/pdfsdk/models/Size");
+    jmethodID constructorId = env->GetMethodID(clazz, "<init>", "(II)V");
+    return env->NewObject(clazz, constructorId, widthInt, heightInt);
+}
+
+JNI_FUNC(void, PdfiumSDK, nativeRenderPageBitmap)(JNI_ARGS, jlong pagePtr, jobject bitmap,
+                                                  jint dpi, jint startX, jint startY,
+                                                  jint drawSizeHor, jint drawSizeVer,
+                                                  jboolean renderAnnot) {
+    FPDF_PAGE page = reinterpret_cast<FPDF_PAGE>(pagePtr);
+    if (page == NULL || bitmap == NULL) {
+        LOGE("Render page pointers invalid");
+        return;
+    }
+
+    AndroidBitmapInfo info;
+    int ret;
+    if ((ret = AndroidBitmap_getInfo(env, bitmap, &info)) < 0) {
+        LOGE("Fetching bitmap info failed: %s", strerror(ret * -1));
+        return;
+    }
+
+    int canvasHorSize = info.width;
+    int canvasVerSize = info.height;
+
+    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888 &&
+        info.format != ANDROID_BITMAP_FORMAT_RGB_565) {
+        LOGE("Bitmap format must be RGBA_8888 or RGB_565");
+        return;
+    }
+
+    void *addr;
+    if ((ret = AndroidBitmap_lockPixels(env, bitmap, &addr)) != 0) {
+        LOGE("Locking bitmap failed: %s", strerror(ret * -1));
+        return;
+    }
+
+    void *tmp;
+    int format;
+    int sourceStride;
+    if (info.format == ANDROID_BITMAP_FORMAT_RGB_565) {
+        tmp = malloc(canvasVerSize * canvasHorSize * sizeof(rgb));
+        sourceStride = canvasHorSize * sizeof(rgb);
+        format = FPDFBitmap_BGR;
+    } else {
+        tmp = addr;
+        sourceStride = info.stride;
+        format = FPDFBitmap_BGRA;
+    }
+
+    FPDF_BITMAP pdfBitmap = FPDFBitmap_CreateEx(canvasHorSize, canvasVerSize,
+                                                format, tmp, sourceStride);
+
+    if (drawSizeHor < canvasHorSize || drawSizeVer < canvasVerSize) {
+        FPDFBitmap_FillRect(pdfBitmap, 0, 0, canvasHorSize, canvasVerSize,
+                            0x848484FF); //Gray
+    }
+
+    int baseHorSize = (canvasHorSize < drawSizeHor) ? canvasHorSize : (int) drawSizeHor;
+    int baseVerSize = (canvasVerSize < drawSizeVer) ? canvasVerSize : (int) drawSizeVer;
+    int baseX = (startX < 0) ? 0 : (int) startX;
+    int baseY = (startY < 0) ? 0 : (int) startY;
+    int flags = FPDF_REVERSE_BYTE_ORDER;
+
+    if (renderAnnot) {
+        flags |= FPDF_ANNOT;
+    }
+
+    if (info.format == ANDROID_BITMAP_FORMAT_RGB_565) {
+        FPDFBitmap_FillRect(pdfBitmap, baseX, baseY, baseHorSize, baseVerSize,
+                            0xFFFFFFFF); //White
+    }
+
+    FPDF_RenderPageBitmap(pdfBitmap, page,
+                          startX, startY,
+                          (int) drawSizeHor, (int) drawSizeVer,
+                          0, flags);
+
+    if (info.format == ANDROID_BITMAP_FORMAT_RGB_565) {
+        rgbBitmapTo565(tmp, sourceStride, addr, &info);
+        free(tmp);
+    }
+
+    AndroidBitmap_unlockPixels(env, bitmap);
+}
 ///////////////////////////////////////
 // PDF TextPage api
 ///////////

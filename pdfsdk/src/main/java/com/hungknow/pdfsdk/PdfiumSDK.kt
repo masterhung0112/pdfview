@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import android.view.Surface
+import com.hungknow.pdfsdk.models.Size
 import java.io.FileDescriptor
 import java.io.IOException
 
@@ -29,6 +30,8 @@ class PdfiumSDK(val densityDpi: Int) {
     drawSizeHor: Int, drawSizeVer: Int,
     renderAnnot: Boolean)
 
+    private external fun nativeGetPageSizeByIndex(documentPtr: Long, pageIndex: Int, dpi: Int): Size
+
     ///////////////////////////////////////
     // PDF TextPage api
     ///////////
@@ -36,6 +39,10 @@ class PdfiumSDK(val densityDpi: Int) {
 
     fun getPageCount(doc: PdfDocument): Int {
        return nativeGetPageCount(doc.NativeDocPtr)
+    }
+
+    fun getPageSize(doc: PdfDocument, index: Int): Size {
+        return nativeGetPageSizeByIndex(doc.NativeDocPtr, index, mCurrentDpi)
     }
 
     fun newDocument(pfd: ParcelFileDescriptor, password: String): PdfDocument {
