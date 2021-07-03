@@ -17,25 +17,25 @@ import com.hungknow.pdfsdk.utils.Utils
 import java.lang.String
 
 
-class DefaultScrollHandle: RelativeLayout, ScrollHandle {
-    val handler = Handler()
+class DefaultScrollHandle(context: Context, var inverted: Boolean): RelativeLayout(context), ScrollHandle {
+    val customHandler = Handler()
     val hidePageScrollerRunnable = Runnable {
         hide()
     }
     lateinit var pdfView: PdfView
     lateinit var textView: TextView
-    var context: Context
-    var inverted: Boolean
-    var currentPos: Float
+//    var context: Context
+//    var inverted: Boolean
+    var currentPos: Float = 0f
     var relativeHandlerMiddle = 0f
 
     constructor(context: Context): this(context, false) {
 
     }
 
-    constructor(context: Context, inverted: Boolean): super(context) {
-        this.context = context
-        this.inverted = inverted
+    init {
+//        this.context = context
+//        this.inverted = inverted
         textView = TextView(context)
         setVisibility(INVISIBLE)
         textView.setTextColor(Color.BLACK)
@@ -46,7 +46,7 @@ class DefaultScrollHandle: RelativeLayout, ScrollHandle {
         if (!shown()) {
             show()
         } else {
-            handler.removeCallbacks(hidePageScrollerRunnable)
+            customHandler.removeCallbacks(hidePageScrollerRunnable)
         }
         if (pdfView != null) {
             setPosition((if (pdfView.swipeVertical) pdfView.getHeight() else pdfView.getWidth()) * position)
@@ -176,7 +176,7 @@ class DefaultScrollHandle: RelativeLayout, ScrollHandle {
     }
 
     override fun hideDelayed() {
-        handler.postDelayed(hidePageScrollerRunnable, 1000)
+        customHandler.postDelayed(hidePageScrollerRunnable, 1000)
     }
 
     private fun isPDFViewReady(): Boolean {
@@ -190,7 +190,7 @@ class DefaultScrollHandle: RelativeLayout, ScrollHandle {
         when (event.action) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 pdfView.stopFling()
-                handler.removeCallbacks(hidePageScrollerRunnable)
+                customHandler.removeCallbacks(hidePageScrollerRunnable)
                 currentPos = if (pdfView.swipeVertical) {
                     event.rawY - y
                 } else {

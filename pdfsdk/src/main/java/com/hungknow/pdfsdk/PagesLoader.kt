@@ -55,7 +55,7 @@ class PagesLoader(val pdfView: PdfView) {
     private var partRenderWidth = 0f
     private var partRenderHeight = 0f
     private var thumbnailRect = RectF(0f, 0f, 1f, 1f)
-    private var preloadOffset = 0f
+    private var preloadOffset = 0
 
     init {
         preloadOffset = Utils.getDP(pdfView.context.resources.displayMetrics, PRELOAD_OFFSET)

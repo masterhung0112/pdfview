@@ -13,6 +13,7 @@ import android.widget.ImageView
 import androidx.navigation.fragment.findNavController
 import com.hungknow.pdfsdk.PdfView
 import com.hungknow.pdfsdk.PdfiumSDK
+import com.hungknow.pdfsdk.listeners.OnLoadCompleteListener
 import com.hungknow.pdfsdk.listeners.OnPageChangeListener
 import com.hungknow.pdfsdk.listeners.OnPageErrorListener
 import com.hungknow.pdfsdk.scroll.DefaultScrollHandle
@@ -22,7 +23,8 @@ import com.hungknow.pdfview.databinding.FragmentFirstBinding
 /**
  * A simple [Fragment] subclass as the default destination in the navigation.
  */
-class FirstFragment : Fragment(), OnPageChangeListener, OnPageErrorListener {
+class FirstFragment : Fragment(), OnPageChangeListener, OnPageErrorListener,
+    OnLoadCompleteListener {
 
     private var _binding: FragmentFirstBinding? = null
     private var pageNumber = 0
@@ -38,7 +40,7 @@ class FirstFragment : Fragment(), OnPageChangeListener, OnPageErrorListener {
     ): View? {
 
         _binding = FragmentFirstBinding.inflate(inflater, container, false)
-        decodePDFPage(binding.pdfView)
+        decodePDFPage(_binding!!.pdfView)
 
         return binding.root
 
@@ -70,8 +72,8 @@ class FirstFragment : Fragment(), OnPageChangeListener, OnPageErrorListener {
             .onPageChange(this)
             .enableAnnotationRendering(true)
             .onLoad(this)
-            .scrollHandle(DefaultScrollHandle(activity.applicationContext))
-            .spacing(10f) // in dp
+            .scrollHandle(DefaultScrollHandle(requireActivity().applicationContext))
+            .spacing(10) // in dp
             .onPageError(this)
             .pageFitPolicy(FitPolicy.BOTH)
             .load();
@@ -92,10 +94,18 @@ class FirstFragment : Fragment(), OnPageChangeListener, OnPageErrorListener {
 
     override fun onPageChanged(page: Int, pageCount: Int) {
         pageNumber = page
-        activity.setTitle(String.format("%s %s / %s", pdfFileName, page + 1, pageCount))
+        requireActivity().title = String.format("%s %s / %s", pdfFileName, page + 1, pageCount)
     }
 
     override fun onPageError(page: Int, t: Throwable) {
         Log.e(TAG, "Cannot load page " + page);
+    }
+
+    companion object {
+        val TAG = FirstFragment::class.simpleName
+    }
+
+    override fun loadComplete(nbPages: Int) {
+
     }
 }

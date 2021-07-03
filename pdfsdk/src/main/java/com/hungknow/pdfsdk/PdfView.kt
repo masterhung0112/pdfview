@@ -835,7 +835,7 @@ class PdfView : RelativeLayout {
         private var password: String? = null
         private var scrollHandle: ScrollHandle? = null
         private var antialiasing = true
-        private var spacing = 0f
+        private var spacing = 0
         private var autoSpacing = false
         private var pageFitPolicy = FitPolicy.WIDTH
         private var fitEachPage = false
@@ -942,7 +942,7 @@ class PdfView : RelativeLayout {
             return this
         }
 
-        fun spacing(spacing: Float): Configurator {
+        fun spacing(spacing: Int): Configurator {
             this.spacing = spacing
             return this
         }

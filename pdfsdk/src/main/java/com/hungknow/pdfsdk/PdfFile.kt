@@ -22,7 +22,7 @@ class PdfFile(
     /** True if scrolling is vertical, else it's horizontal  */
     val isVertical: Boolean,
     /** Fixed spacing between pages in pixels  */
-    val spacing: Float,
+    val spacing: Int,
     /** Calculate spacing automatically so each page fits on it's own in the center of the view  */
     val autoSpacing: Boolean,
     /**
